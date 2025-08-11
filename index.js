@@ -101,6 +101,7 @@ It requires the following fields in the request body:
 - disclaimer
 - author
 - author_instagram
+- author_bio
 */
 // TODO: Accept multiple submissions in a single request
 app.post("/submissions", async (req, res) => {
@@ -112,16 +113,10 @@ app.post("/submissions", async (req, res) => {
       disclaimer,
       author,
       author_instagram,
+      author_bio,
     } = req.body;
 
-    if (
-      !title ||
-      !content ||
-      !submission_type ||
-      !disclaimer ||
-      !author ||
-      !author_instagram
-    ) {
+    if (!title || !content || !submission_type || !disclaimer || !author) {
       return res.status(422).send({ error: "Missing required fields" });
     }
 
@@ -137,8 +132,7 @@ app.post("/submissions", async (req, res) => {
       return res.status(422).send({ error: "Invalid submission type" });
     }
 
-    if (author_instagram === "") author_instagram = null;
-
+    if (!author_instagram) author_instagram == null;
     const result = await sql`
       INSERT INTO submissions (title, content, submission_type, disclaimer, author, author_instagram)
       VALUES (${title}, ${content}, ${submission_type}, ${disclaimer}, ${author}, ${author_instagram})
@@ -201,7 +195,6 @@ app.listen(process.env.PORT, () => {
 //   .then((data) => console.log(data))
 //   .catch((e) => console.error(e));
 
-
 // Create new post
 // await fetch("http://localhost:6969/submissions", {
 //   method: "POST",
@@ -240,3 +233,20 @@ app.listen(process.env.PORT, () => {
 //   .then((data) => console.log(data))
 //   .catch((e) => console.error(e));
 
+// await fetch("http://localhost:6969/submissions", {
+//   method: "POST",
+//   headers: {
+//     "Content-Type": "application/json",
+//     "x-api-key": "...",
+//   },
+//   body: JSON.stringify({
+//     title: "Test Submission",
+//     content: "This is a test submission content.",
+//     submission_type: "poetry",
+//     disclaimer: "This is a test disclaimer.",
+//     author: "John Doe",
+//   }),
+// })
+//   .then((res) => res.json())
+//   .then((data) => console.log(data))
+//   .catch((e) => console.error(e));
