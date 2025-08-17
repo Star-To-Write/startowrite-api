@@ -10,6 +10,9 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// submission categories - also used for the slugging
+const validCategories = ['poetry', 'short-stories', 'essays-opinions-research-papers', 'writing-to-spread-awareness', 'other-creative-works', 'issues', 'interviews']
+
 // health check
 app.get("/", (req, res) => {
   try {
@@ -35,12 +38,7 @@ app.use((req, res, next) => {
 /*
 FILTERING:
 This endpoint accepts a query parameter `submission_type` to filter submissions by type.
-Valid values for `submission_type` are:
-- poetry
-- essay
-- short_story
-- awareness
-- other
+Valid values for `submission_type` are listed in the validCategories
 If `submission_type` is not provided, it returns all submissions.
 */
 app.get("/submissions", async (req, res) => {
@@ -49,16 +47,9 @@ app.get("/submissions", async (req, res) => {
 
     let rows;
     if (submission_type) {
-      if (
-        !submission_type.includes(
-          "poetry",
-          "essay",
-          "short_story",
-          "awareness",
-          "other"
-        )
-      )
+      if (!validCategories.some(term => submission_type.includes(term))) {
         return res.status(422).send({ error: "Invalid category" });
+      }
       rows = await sql`
         SELECT * FROM submissions
         WHERE submission_type = ${submission_type}
@@ -97,13 +88,13 @@ This endpoint is used to create a new submission.
 It requires the following fields in the request body:
 - title
 - content
-- submission_type (must be one of: poetry, essay, short_story, awareness, other)
-- disclaimer
-- author
-- author_instagram
-- author_bio
+- submission_type (must be one of the validCategories)
+- disclaimer (optional)
+- author (optional, defaults to 'Anonymous Writer')
+- author_socials (optional)
+- author_bio (optional)
+- bibliography (optional)
 */
-// TODO: Accept multiple submissions in a single request
 app.post("/submissions", async (req, res) => {
   try {
     const {
@@ -112,36 +103,32 @@ app.post("/submissions", async (req, res) => {
       submission_type,
       disclaimer,
       author,
-      author_instagram,
+      author_socials,
       author_bio,
+      bibliography,
     } = req.body;
 
-    if (!title || !content || !submission_type || !disclaimer || !author) {
-      return res.status(422).send({ error: "Missing required fields" });
+    if (!title || !content || !submission_type) {
+      return res.status(422).send({ error: "Missing required fields: title, content, submission_type" });
     }
 
-    if (
-      !submission_type.includes(
-        "poetry",
-        "essay",
-        "short_story",
-        "awareness",
-        "other"
-      )
-    ) {
-      return res.status(422).send({ error: "Invalid submission type" });
+    if (!validCategories.includes(submission_type)) {
+      return res.status(422).send({ 
+        error: "Invalid submission type", 
+        validCategories: validCategories 
+      });
     }
 
-    if (!author_instagram) author_instagram == null;
     const result = await sql`
-      INSERT INTO submissions (title, content, submission_type, disclaimer, author, author_instagram)
-      VALUES (${title}, ${content}, ${submission_type}, ${disclaimer}, ${author}, ${author_instagram})
-      RETURNING id, title, submission_type
+      INSERT INTO submissions (title, content, submission_type, disclaimer, author, author_socials, author_bio, bibliography)
+      VALUES (${title}, ${content}, ${submission_type}, ${disclaimer || null}, ${author || 'Anonymous Writer'}, ${author_socials || null}, ${author_bio || null}, ${bibliography || null})
+      RETURNING id, title, submission_type, author, created_at
     `;
+    
     console.log(
-      `New post: ${result[0].title} of type ${result[0].submission_type} (#${result[0].id})`
+      `New post: ${result[0].title} by ${result[0].author} of type ${result[0].submission_type} (#${result[0].id})`
     );
-    res.status(201).json(result);
+    res.status(201).json(result[0]);
   } catch (e) {
     console.error(e);
     res.status(500).send("Internal Server Error");
@@ -152,21 +139,23 @@ app.post("/submissions", async (req, res) => {
 // Add a new comment
 app.post("/comments", async (req, res) => {
   try {
-    const { subs_id, parent_id, content, author } = req.body;
+    let { subs_id, parent_id, content, author } = req.body;
 
-    if (parent_id === "") parent_id = null; // allow parent_id to be optional
+    if (parent_id === "" || parent_id === undefined) {
+      parent_id = null; // allow parent_id to be optional
+    }
 
     if (!subs_id || !content || !author) {
-      return res.status(422).send({ error: "Missing required fields" });
+      return res.status(422).send({ error: "Missing required fields: subs_id, content, author" });
     }
 
     const result = await sql`
       INSERT INTO comments (subs_id, parent_id, content, author)
       VALUES (${subs_id}, ${parent_id}, ${content}, ${author})
-      RETURNING id, subs_id, content, author
+      RETURNING id, subs_id, parent_id, content, author, created_at
       `;
-    console.log(`New comment on submission #${subs_id}: ${result[0].content}`);
-    res.status(201).json(result);
+    console.log(`New comment on submission #${subs_id} by ${result[0].author}: ${result[0].content.substring(0, 50)}...`);
+    res.status(201).json(result[0]);
   } catch (e) {
     console.error(e);
     res.status(500).send("Internal Server Error");
@@ -185,30 +174,61 @@ app.listen(process.env.PORT, () => {
 //     console.log(jwk.k)
 //   })()
 
-// example fetch request
+// EXAMPLE REQUESTS:
+
+// Get all submissions
 // await fetch("http://localhost:6969/submissions", {
 //   headers: {
-//     "x-api-key": "...",
+//     "x-api-key": "your-api-key",
 //   },
 // })
 //   .then((res) => res.json())
 //   .then((data) => console.log(data))
 //   .catch((e) => console.error(e));
 
-// Create new post
+// Get submissions filtered by category
+// await fetch("http://localhost:6969/submissions?submission_type=poetry", {
+//   headers: {
+//     "x-api-key": "your-api-key",
+//   },
+// })
+//   .then((res) => res.json())
+//   .then((data) => console.log(data))
+//   .catch((e) => console.error(e));
+
+// Create new post with new schema
 // await fetch("http://localhost:6969/submissions", {
 //   method: "POST",
 //   headers: {
 //     "Content-Type": "application/json",
-//     "x-api-key": "...",
+//     "x-api-key": "your-api-key",
 //   },
 //   body: JSON.stringify({
-//     title: "Test Submission",
-//     content: "This is a test submission content.",
+//     title: "Test Submission with New Schema",
+//     content: "This is a test submission content with the updated schema.",
 //     submission_type: "poetry",
 //     disclaimer: "This is a test disclaimer.",
 //     author: "John Doe",
-//     author_instagram: "@johndoe",
+//     author_socials: "Twitter: @johndoe, Instagram: @john.doe.writer",
+//     author_bio: "John Doe is a writer and poet exploring themes of identity.",
+//     bibliography: "<p><strong>Influences:</strong></p><ul><li>Whitman, Walt. <em>Leaves of Grass</em>.</li></ul>"
+//   }),
+// })
+//   .then((res) => res.json())
+//   .then((data) => console.log(data))
+//   .catch((e) => console.error(e));
+
+// Create minimal post (only required fields)
+// await fetch("http://localhost:6969/submissions", {
+//   method: "POST",
+//   headers: {
+//     "Content-Type": "application/json",
+//     "x-api-key": "your-api-key",
+//   },
+//   body: JSON.stringify({
+//     title: "Minimal Test Post",
+//     content: "This post only has the required fields.",
+//     submission_type: "other-creative-works"
 //   }),
 // })
 //   .then((res) => res.json())
@@ -220,12 +240,12 @@ app.listen(process.env.PORT, () => {
 //   method: "POST",
 //   headers: {
 //     "Content-Type": "application/json",
-//     "x-api-key": "...",
+//     "x-api-key": "your-api-key",
 //   },
 //   body: JSON.stringify({
-//     subs_id: 4,
-//     parent_id: null,
-//     content: "This is a test comment.",
+//     subs_id: 1,
+//     parent_id: null, // top-level comment
+//     content: "This is a test comment on the new system.",
 //     author: "Jane Doe",
 //   }),
 // })
@@ -233,18 +253,18 @@ app.listen(process.env.PORT, () => {
 //   .then((data) => console.log(data))
 //   .catch((e) => console.error(e));
 
-// await fetch("http://localhost:6969/submissions", {
+// Create reply to existing comment
+// await fetch("http://localhost:6969/comments", {
 //   method: "POST",
 //   headers: {
 //     "Content-Type": "application/json",
-//     "x-api-key": "...",
+//     "x-api-key": "your-api-key",
 //   },
 //   body: JSON.stringify({
-//     title: "Test Submission",
-//     content: "This is a test submission content.",
-//     submission_type: "poetry",
-//     disclaimer: "This is a test disclaimer.",
-//     author: "John Doe",
+//     subs_id: 1,
+//     parent_id: 2, // replying to comment with id 2
+//     content: "This is a reply to another comment.",
+//     author: "Reply Author",
 //   }),
 // })
 //   .then((res) => res.json())
